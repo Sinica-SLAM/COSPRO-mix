@@ -6,6 +6,7 @@ from scipy.signal import resample_poly
 
 def read_scaled_wav(path, start, end, scaling_factor, downsample_8K=False):
     samples, sr_orig = sf.read(path, start=start, stop=end)
+    samples = samples / np.max(samples)
 
     if len(samples.shape) > 1:
         samples = samples[:, 0]
@@ -88,10 +89,14 @@ def create_wham_mixes(s1_samples, s2_samples, noise_samples):
     return mix_clean, mix_single, mix_both
 
 
-def create_overlap_mixes(s1_samples, s2_samples, s3_samples=[0]):
+def create_overlap_mixes(s1_samples, s2_samples, s3_samples=[0], full_overlap=True):
     utt_overlaps = []
     utt_len = len(s1_samples)
-    for overlap_ratio in [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]:
+    if full_overlap:
+        overlap_ratios = [1.0]
+    else:
+        overlap_ratios = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
+    for overlap_ratio in overlap_ratios:
         append_len = int(utt_len * (0.5 - overlap_ratio / 2) / (0.5 + overlap_ratio / 2))
         if len(s3_samples) == 1:
             zero_append = np.zeros(append_len)
@@ -162,5 +167,39 @@ def find_cospro_path(cospro_root, s_path):
                 break
     assert wav_name != None, f'We didn\'t find {utt_num} in {wav_dir}'
     wav_path = os.path.join(wav_dir, wav_name)
+
+    return wav_path, start, end
+
+
+def find_tat_path(tat_root, s_path):
+    # find details of wav
+    # ex:  s_path: train/condenser/KK_KKM0003_0049-6.9_0002010-0007950.wav
+    #     set_dir: TAT-Vol1-train
+    #         spk: KK_KKM0003
+    #     utt_name: 0049-6.9
+    #       start: 0002010
+    #         end: 0007950
+    details = s_path.split('/')
+    channel = details[1]
+    wav_details = details[-1][:-4].split('_')
+
+    spk = '_'.join([wav_details[0], wav_details[1]])
+
+    utt_name = wav_details[-2]
+    channels = ['XYH-6-X', 'XYH-6-Y', 'condenser', 'lavalier', 'ios', 'android']
+    channel_num = channels.index(channel) + 1
+    utt_name = utt_name + '-0' + str(channel_num) + '.wav'
+
+    start = wav_details[-1].split('-')[0]
+    start = float(start) / 1000
+    end = wav_details[-1].split('-')[1]
+    end = float(end) / 1000
+    
+    # find wav dir
+    wav_dir = os.path.join(tat_root, 'TAT-Vol{}', 'TAT-{}-{}', channel, 'wav', spk)
+    for vol in [(1, 'Vol1'), (2, 'vol2')]:
+        wav_dir_trial = wav_dir.format(vol[0], vol[1], details[0])
+        if os.path.isdir(wav_dir_trial):
+            wav_path = os.path.join(wav_dir_trial, utt_name)
 
     return wav_path, start, end

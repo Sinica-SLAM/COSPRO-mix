@@ -4,7 +4,7 @@ import soundfile as sf
 import pyloudnorm as pyln
 from constants import SAMPLERATE, MAX_SAMPLE_AMP
 import argparse
-from utils import read_scaled_wav, quantize, fix_length, create_overlap_mixes, find_cospro_path
+from utils import read_scaled_wav, quantize, fix_length, create_overlap_mixes, find_cospro_path, find_tat_path
 
 
 FILELIST_STUB = os.path.join('data', '{}', 'mix_{}_spk_{}.txt')
@@ -20,8 +20,10 @@ S2_DIR = 's2'
 S3_DIR = 's3'
 
 
-def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
+def create_cospro_mix(cospro_root, tat_root, wsj0_root, output_root, spk_num, data, full_overlap):
     assert spk_num == 2 or spk_num == 3, f"Spk num should be 2 or 3, but we got {spk_num}"
+    if '3' in data:
+        spk_num = 3
 
     for splt in ['tr', 'cv', 'tt']:
         mix_data_path = FILELIST_STUB.format(data, spk_num, splt)
@@ -58,11 +60,12 @@ def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
                 
                 output_path = os.path.join(output_root, wav_dir, datalen_dir, splt)
                 os.makedirs(os.path.join(output_path, MIX_100_DIR), exist_ok=True)
-                os.makedirs(os.path.join(output_path, MIX_80_DIR), exist_ok=True)
-                os.makedirs(os.path.join(output_path, MIX_60_DIR), exist_ok=True)
-                os.makedirs(os.path.join(output_path, MIX_40_DIR), exist_ok=True)
-                os.makedirs(os.path.join(output_path, MIX_20_DIR), exist_ok=True)
-                os.makedirs(os.path.join(output_path, MIX_0_DIR), exist_ok=True)
+                if not full_overlap:
+                    os.makedirs(os.path.join(output_path, MIX_80_DIR), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, MIX_60_DIR), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, MIX_40_DIR), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, MIX_20_DIR), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, MIX_0_DIR), exist_ok=True)
                 os.makedirs(os.path.join(output_path, S1_DIR), exist_ok=True)
                 os.makedirs(os.path.join(output_path, S2_DIR), exist_ok=True)
                 if spk_num == 3:
@@ -71,28 +74,37 @@ def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
                 for i_utt, mix_data in enumerate(mix_data_df):
                     if spk_num == 2:
                         s1_path, s2_path, mix_ratio = mix_data
-                        s1_path_w = s1_path.split('.')[0].split('/')[-1]
-                        s2_path_w = s2_path.split('.')[0].split('/')[-1]
+                        s1_path_w = s1_path[:-4].split('/')[-1]
+                        s2_path_w = s2_path[:-4].split('/')[-1]
                         output_name = s1_path_w + '_' + str(mix_ratio) + '_' + s2_path_w + '_' + str(-1*mix_ratio) + '.wav'
                     else:
                         s1_path, s2_path, s3_path, mix_ratio = mix_data
-                        s1_path_w = s1_path.split('.')[0].split('/')[-1]
-                        s2_path_w = s2_path.split('.')[0].split('/')[-1]
-                        s3_path_w = s3_path.split('.')[0].split('/')[-1]
+                        s1_path_w = s1_path[:-4].split('/')[-1]
+                        s2_path_w = s2_path[:-4].split('/')[-1]
+                        s3_path_w = s3_path[:-4].split('/')[-1]
                         output_name = s1_path_w + '_' + str(mix_ratio) + '_' + s2_path_w + '_' + str(-1*mix_ratio) + '_' + s3_path_w + '_0.wav'
 
                     if s1_path.startswith('si'):
                         s1_path = os.path.join(wsj0_root, s1_path)
                         s1_start = 0
                         s1_end = None
+                    elif 'train' in s1_path or 'eval' in s1_path:
+                        s1_path, s1_start, s1_end = find_tat_path(tat_root, s1_path)
+                        s1_start *= SAMPLERATE
+                        s1_end *= SAMPLERATE
                     else:
                         s1_path, s1_start, s1_end = find_cospro_path(cospro_root, s1_path)
                         s1_start *= SAMPLERATE
                         s1_end *= SAMPLERATE
+
                     if s2_path.startswith('si'):
                         s2_path = os.path.join(wsj0_root, s2_path)
                         s2_start = 0
                         s2_end = None
+                    elif 'train' in s2_path or 'eval' in s2_path:
+                        s2_path, s2_start, s2_end = find_tat_path(tat_root, s2_path)
+                        s2_start *= SAMPLERATE
+                        s2_end *= SAMPLERATE
                     else:
                         s2_path, s2_start, s2_end = find_cospro_path(cospro_root, s2_path)
                         s2_start *= SAMPLERATE
@@ -113,7 +125,7 @@ def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
 
                     if spk_num == 2:
                         s1_samples, s2_samples = fix_length(s1, s2, min_or_max=datalen_dir)
-                        mix_samples_list = create_overlap_mixes(s1_samples, s2_samples)
+                        mix_samples_list = create_overlap_mixes(s1_samples, s2_samples, full_overlap=full_overlap)
                         samps = mix_samples_list + [s1_samples, s2_samples]
 
                     else:
@@ -121,6 +133,10 @@ def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
                             s3_path = os.path.join(wsj0_root, s3_path)
                             s3_start = 0
                             s3_end = None
+                        elif 'train' in s3_path or 'eval' in s3_path:
+                            s3_path, s3_start, s3_end = find_tat_path(tat_root, s3_path)
+                            s3_start *= SAMPLERATE
+                            s3_end *= SAMPLERATE
                         else:
                             s3_path, s3_start, s3_end = find_cospro_path(cospro_root, s3_path)
                             s3_start *= SAMPLERATE
@@ -132,7 +148,7 @@ def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
                         s3 = quantize(s3) * s3_g
 
                         s1_samples, s2_samples, s3_samples = fix_length(s1, s2, s3, min_or_max=datalen_dir)
-                        mix_samples_list = create_overlap_mixes(s1_samples, s2_samples, s3_samples)
+                        mix_samples_list = create_overlap_mixes(s1_samples, s2_samples, s3_samples, full_overlap=full_overlap)
                         samps = mix_samples_list + [s1_samples, s2_samples, s3_samples]
 
                     # check for clipping and fix gains
@@ -148,7 +164,10 @@ def create_cospro_mix(cospro_root, wsj0_root, output_root, spk_num, data):
                     samps_after_g = [samp * lin_gain for samp in samps]
 
                     # write audio
-                    dirs = [MIX_100_DIR, MIX_80_DIR, MIX_60_DIR, MIX_40_DIR, MIX_20_DIR,  MIX_0_DIR, S1_DIR, S2_DIR]
+                    if full_overlap:
+                        dirs = [MIX_100_DIR, S1_DIR, S2_DIR]
+                    else:
+                        dirs = [MIX_100_DIR, MIX_80_DIR, MIX_60_DIR, MIX_40_DIR, MIX_20_DIR, MIX_0_DIR, S1_DIR, S2_DIR]
                     if spk_num == 3: dirs.append(S3_DIR)
                     for dir, samp in zip(dirs, samps_after_g):
                         sf.write(os.path.join(output_path, dir, output_name), samp,
@@ -162,13 +181,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-dir', '-o', type=str,
                         help='Output directory for writing wsj0-2mix 8 kHz and 16 kHz datasets.')
-    parser.add_argument('--cospro-root', '-c', type=str,
-                        help='Path to the folder containing cospro wavs')
+    parser.add_argument('--cospro-root', '-c', type=str, default=None,
+                        help='Path to the folder containing COSPRO wavs')
+    parser.add_argument('--tat-root', '-t', type=str, default=None,
+                        help='Path to the folder containing TAT wavs')
     parser.add_argument('--wsj0-root', '-w', type=str, default=None,
-                        help='Path to the folder containing wsj0 dirs')
+                        help='Path to the folder containing WSJ0 dirs')
     parser.add_argument('--spk-num', '-n', type=int, default=2,
                         help='mix 2 or 3 spk')
-    parser.add_argument('--data', '-d', type=str, default='data_2mix',
+    parser.add_argument('--data', '-d', type=str, default='data_COSPRO-2mix',
                         help='the data you want to mix')
+    parser.add_argument('--full_overlap', '-f', type=bool, default=True,
+                        help='whether make different overlap ratios ,True for only fully overlapped')
     args = parser.parse_args()
-    create_cospro_mix(args.cospro_root, args.wsj0_root, args.output_dir, args.spk_num, args.data)
+    create_cospro_mix(args.cospro_root, args.tat_root, args.wsj0_root, args.output_dir, args.spk_num, args.data, args.full_overlap)
